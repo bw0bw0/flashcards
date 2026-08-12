@@ -54,7 +54,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
+  padding: calc(14px + env(safe-area-inset-top)) 16px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
   position: sticky;
