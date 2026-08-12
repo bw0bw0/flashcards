@@ -1,9 +1,8 @@
 use rusqlite::{params, Connection, Row};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::decks;
-use crate::db::Db;
+use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{Card, CardSelection, DeckKind};
 
@@ -55,8 +54,8 @@ pub fn renumber(conn: &Connection, deck_id: i64) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_cards(db: State<'_, Db>, deck_id: i64) -> Result<Vec<Card>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_cards(db: DbState<'_>, deck_id: i64) -> Result<Vec<Card>> {
     db.with(|conn| {
         let sql = format!("{CARD_SELECT} WHERE deck_id = ?1 ORDER BY idx");
         let mut stmt = conn.prepare(&sql)?;
@@ -66,14 +65,14 @@ pub fn list_cards(db: State<'_, Db>, deck_id: i64) -> Result<Vec<Card>> {
 }
 
 /// The cards a story session walks through: a whole deck or a slice of one.
-#[tauri::command]
-pub fn list_selection(db: State<'_, Db>, selection: CardSelection) -> Result<Vec<Card>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_selection(db: DbState<'_>, selection: CardSelection) -> Result<Vec<Card>> {
     db.with(|conn| cards_in_selection(conn, &selection))
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn create_card(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     deck_id: i64,
     front: String,
     back: Option<String>,
@@ -106,9 +105,9 @@ pub fn create_card(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn update_card(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     id: i64,
     front: String,
     back: Option<String>,
@@ -136,8 +135,8 @@ pub fn update_card(
     })
 }
 
-#[tauri::command]
-pub fn delete_card(db: State<'_, Db>, id: i64) -> Result<()> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn delete_card(db: DbState<'_>, id: i64) -> Result<()> {
     db.with(|conn| {
         let deck_id: i64 = conn
             .query_row("SELECT deck_id FROM card WHERE id = ?1", params![id], |r| {
@@ -178,14 +177,17 @@ fn move_within_deck(conn: &Connection, id: i64, to_index: i64) -> Result<i64> {
                 params![deck_id, current, target],
             )?;
         }
-        conn.execute("UPDATE card SET idx = ?2 WHERE id = ?1", params![id, target])?;
+        conn.execute(
+            "UPDATE card SET idx = ?2 WHERE id = ?1",
+            params![id, target],
+        )?;
     }
     renumber(conn, deck_id)?;
     Ok(deck_id)
 }
 
-#[tauri::command]
-pub fn move_card(db: State<'_, Db>, id: i64, to_index: i64) -> Result<Vec<Card>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn move_card(db: DbState<'_>, id: i64, to_index: i64) -> Result<Vec<Card>> {
     db.with(|conn| {
         let deck_id = move_within_deck(conn, id, to_index)?;
         let sql = format!("{CARD_SELECT} WHERE deck_id = ?1 ORDER BY idx");
@@ -223,10 +225,7 @@ fn strip_fence(text: &str) -> &str {
     };
     // Drop the (optional) language tag on the opening fence.
     let rest = rest.split_once('\n').map(|(_, rest)| rest).unwrap_or("");
-    rest.trim_end()
-        .strip_suffix("```")
-        .unwrap_or(rest)
-        .trim()
+    rest.trim_end().strip_suffix("```").unwrap_or(rest).trim()
 }
 
 /// Accepts a bare array, or an object with a `cards` key holding one. Shared
@@ -242,16 +241,18 @@ pub fn extract_array(text: &str) -> Result<Vec<serde_json::Value>> {
                 serde_json::Value::Array(items) => Some(items),
                 _ => None,
             })
-            .ok_or_else(|| Error::invalid("expected a JSON array, or an object with a `cards` array")),
+            .ok_or_else(|| {
+                Error::invalid("expected a JSON array, or an object with a `cards` array")
+            }),
         _ => Err(Error::invalid("expected a JSON array of cards")),
     }
 }
 
 /// Imports cards into a normal deck. Cards are numbered in the order they
 /// appear, continuing from the end of the deck unless `replace` is set.
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn import_cards(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     deck_id: i64,
     json: String,
     replace: bool,
@@ -314,8 +315,8 @@ pub fn import_cards(
 }
 
 /// Exports a deck in the same shape `import_cards` accepts.
-#[tauri::command]
-pub fn export_cards(db: State<'_, Db>, deck_id: i64) -> Result<String> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn export_cards(db: DbState<'_>, deck_id: i64) -> Result<String> {
     db.with(|conn| {
         let sql = format!("{CARD_SELECT} WHERE deck_id = ?1 ORDER BY idx");
         let mut stmt = conn.prepare(&sql)?;
@@ -340,6 +341,7 @@ pub fn export_cards(db: State<'_, Db>, deck_id: i64) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Db;
     use crate::models::CardSelection;
 
     fn seeded() -> Db {
@@ -403,7 +405,8 @@ mod tests {
             conn.execute("DELETE FROM card WHERE idx IN (2, 4)", [])?;
             renumber(conn, 1)?;
             let indices: Vec<i64> = {
-                let mut stmt = conn.prepare("SELECT idx FROM card WHERE deck_id = 1 ORDER BY idx")?;
+                let mut stmt =
+                    conn.prepare("SELECT idx FROM card WHERE deck_id = 1 ORDER BY idx")?;
                 let rows = stmt.query_map([], |row| row.get(0))?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()?
             };

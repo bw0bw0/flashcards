@@ -1,8 +1,7 @@
-use rusqlite::{params, Connection, Row};
-use tauri::State;
+﻿use rusqlite::{params, Connection, Row};
 
 use crate::commands::now_string;
-use crate::db::Db;
+use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{Deck, DeckKind};
 
@@ -60,8 +59,8 @@ pub fn require_kind(conn: &Connection, id: i64, kind: DeckKind) -> Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-pub fn list_decks(db: State<'_, Db>) -> Result<Vec<Deck>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_decks(db: DbState<'_>) -> Result<Vec<Deck>> {
     db.with(|conn| {
         let sql = format!(
             "{DECK_SELECT} ORDER BY c.position IS NULL, c.position, c.name, d.position, d.name"
@@ -72,14 +71,14 @@ pub fn list_decks(db: State<'_, Db>) -> Result<Vec<Deck>> {
     })
 }
 
-#[tauri::command]
-pub fn get_deck(db: State<'_, Db>, id: i64) -> Result<Deck> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn get_deck(db: DbState<'_>, id: i64) -> Result<Deck> {
     db.with(|conn| read(conn, id))
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn create_deck(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     name: String,
     category_id: Option<i64>,
     description: Option<String>,
@@ -119,9 +118,9 @@ pub fn insert_deck(
     read(conn, conn.last_insert_rowid())
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn update_deck(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     id: i64,
     name: String,
     category_id: Option<i64>,
@@ -145,8 +144,8 @@ pub fn update_deck(
 
 /// Deleting a normal deck also deletes its cards, and with them any spaced
 /// repetition entries pointing at those cards.
-#[tauri::command]
-pub fn delete_deck(db: State<'_, Db>, id: i64) -> Result<()> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn delete_deck(db: DbState<'_>, id: i64) -> Result<()> {
     db.with(|conn| {
         conn.execute("DELETE FROM deck WHERE id = ?1", params![id])?;
         Ok(())

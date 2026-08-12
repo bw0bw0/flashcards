@@ -1,7 +1,6 @@
-use rusqlite::{params, Connection};
-use tauri::State;
+﻿use rusqlite::{params, Connection};
 
-use crate::db::Db;
+use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::Category;
 
@@ -20,8 +19,8 @@ fn read(conn: &Connection, id: i64) -> Result<Category> {
     .map_err(|_| Error::invalid("category not found"))
 }
 
-#[tauri::command]
-pub fn list_categories(db: State<'_, Db>) -> Result<Vec<Category>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_categories(db: DbState<'_>) -> Result<Vec<Category>> {
     db.with(|conn| {
         let mut stmt =
             conn.prepare("SELECT id, name, position FROM category ORDER BY position, name")?;
@@ -36,8 +35,8 @@ pub fn list_categories(db: State<'_, Db>) -> Result<Vec<Category>> {
     })
 }
 
-#[tauri::command]
-pub fn create_category(db: State<'_, Db>, name: String) -> Result<Category> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn create_category(db: DbState<'_>, name: String) -> Result<Category> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err(Error::invalid("category name cannot be empty"));
@@ -56,8 +55,8 @@ pub fn create_category(db: State<'_, Db>, name: String) -> Result<Category> {
     })
 }
 
-#[tauri::command]
-pub fn update_category(db: State<'_, Db>, id: i64, name: String) -> Result<Category> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn update_category(db: DbState<'_>, id: i64, name: String) -> Result<Category> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err(Error::invalid("category name cannot be empty"));
@@ -75,8 +74,8 @@ pub fn update_category(db: State<'_, Db>, id: i64, name: String) -> Result<Categ
 }
 
 /// Deleting a category leaves its decks in place, uncategorised.
-#[tauri::command]
-pub fn delete_category(db: State<'_, Db>, id: i64) -> Result<()> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn delete_category(db: DbState<'_>, id: i64) -> Result<()> {
     db.with(|conn| {
         conn.execute("DELETE FROM category WHERE id = ?1", params![id])?;
         Ok(())

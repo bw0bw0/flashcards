@@ -7,7 +7,17 @@ use crate::error::Result;
 /// Shared handle to the SQLite connection, stored in Tauri's managed state.
 pub struct Db(pub Mutex<Connection>);
 
+/// How the commands receive the database. Tauri hands it over as managed state;
+/// under `cargo test` it is a plain reference, so the commands can be called
+/// directly without standing up a Tauri runtime.
+#[cfg(not(test))]
+pub type DbState<'a> = tauri::State<'a, Db>;
+#[cfg(test)]
+pub type DbState<'a> = &'a Db;
+
 impl Db {
+    /// Only the Tauri entry point opens a file, and that is not built for tests.
+    #[cfg_attr(test, allow(dead_code))]
     pub fn open(path: &std::path::Path) -> Result<Self> {
         let conn = Connection::open(path)?;
         prepare(&conn)?;

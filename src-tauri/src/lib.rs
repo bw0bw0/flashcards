@@ -3,13 +3,17 @@ mod db;
 mod error;
 mod models;
 mod srs;
+#[cfg(test)]
+mod tests;
 
-use tauri::Manager;
-
-use crate::db::Db;
-
+/// The commands are plain functions under `cargo test` (see `db::DbState`), so
+/// the Tauri wiring is only compiled for the real build.
+#[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use crate::db::Db;
+    use tauri::Manager;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())

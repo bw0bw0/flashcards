@@ -1,10 +1,9 @@
-use chrono::{Duration, Utc};
+﻿use chrono::{Duration, Utc};
 use rusqlite::{params, Connection, Row};
 use serde::Serialize;
-use tauri::State;
 
 use crate::commands::{cards, decks, now_string, parse_time, to_string};
-use crate::db::Db;
+use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{Card, CardSelection, Deck, DeckKind, SrCard, SrDeckStats};
 use crate::srs::{self, Grade, Schedule, State as SrState};
@@ -64,9 +63,9 @@ fn add_selections(conn: &Connection, sr_deck_id: i64, selections: &[CardSelectio
     Ok(added)
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn create_sr_deck(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     name: String,
     category_id: Option<i64>,
     description: Option<String>,
@@ -79,9 +78,9 @@ pub fn create_sr_deck(
     })
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn add_to_sr_deck(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     sr_deck_id: i64,
     selections: Vec<CardSelection>,
 ) -> Result<i64> {
@@ -91,8 +90,8 @@ pub fn add_to_sr_deck(
     })
 }
 
-#[tauri::command]
-pub fn list_sr_cards(db: State<'_, Db>, sr_deck_id: i64) -> Result<Vec<SrCard>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_sr_cards(db: DbState<'_>, sr_deck_id: i64) -> Result<Vec<SrCard>> {
     db.with(|conn| {
         let sql = format!("{SR_SELECT} WHERE s.sr_deck_id = ?1 ORDER BY d.name, k.idx");
         let mut stmt = conn.prepare(&sql)?;
@@ -101,8 +100,8 @@ pub fn list_sr_cards(db: State<'_, Db>, sr_deck_id: i64) -> Result<Vec<SrCard>> 
     })
 }
 
-#[tauri::command]
-pub fn remove_sr_cards(db: State<'_, Db>, sr_card_ids: Vec<i64>) -> Result<usize> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn remove_sr_cards(db: DbState<'_>, sr_card_ids: Vec<i64>) -> Result<usize> {
     db.with(|conn| {
         let tx = conn.transaction()?;
         let mut removed = 0;
@@ -116,8 +115,8 @@ pub fn remove_sr_cards(db: State<'_, Db>, sr_card_ids: Vec<i64>) -> Result<usize
 
 /// The study queue: cards that are due now, followed by learning cards due in
 /// the next few minutes.
-#[tauri::command]
-pub fn sr_queue(db: State<'_, Db>, sr_deck_id: i64, limit: Option<i64>) -> Result<Vec<SrCard>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn sr_queue(db: DbState<'_>, sr_deck_id: i64, limit: Option<i64>) -> Result<Vec<SrCard>> {
     let now = Utc::now();
     let now_str = to_string(now);
     let ahead = to_string(now + Duration::minutes(LEARN_AHEAD_MINUTES));
@@ -140,8 +139,8 @@ pub fn sr_queue(db: State<'_, Db>, sr_deck_id: i64, limit: Option<i64>) -> Resul
     })
 }
 
-#[tauri::command]
-pub fn sr_deck_stats(db: State<'_, Db>, sr_deck_id: i64) -> Result<SrDeckStats> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn sr_deck_stats(db: DbState<'_>, sr_deck_id: i64) -> Result<SrDeckStats> {
     let now = now_string();
     let today = to_string(Utc::now() - Duration::hours(24));
     db.with(|conn| {
@@ -203,8 +202,8 @@ fn humanise(minutes: i64) -> String {
     }
 }
 
-#[tauri::command]
-pub fn grade_sr_card(db: State<'_, Db>, sr_card_id: i64, grade: Grade) -> Result<GradeResult> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<GradeResult> {
     let now = Utc::now();
     db.with(|conn| {
         let previous = conn
@@ -267,8 +266,8 @@ pub fn grade_sr_card(db: State<'_, Db>, sr_card_id: i64, grade: Grade) -> Result
 }
 
 /// Puts a card back to the state it had when it was first added to the deck.
-#[tauri::command]
-pub fn reset_sr_card(db: State<'_, Db>, sr_card_id: i64) -> Result<()> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn reset_sr_card(db: DbState<'_>, sr_card_id: i64) -> Result<()> {
     let fresh = Schedule::new(Utc::now());
     db.with(|conn| {
         conn.execute(

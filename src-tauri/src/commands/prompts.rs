@@ -1,9 +1,8 @@
-use rusqlite::{params, Connection};
+﻿use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::State;
 
 use crate::commands::{cards, decks, now_string};
-use crate::db::Db;
+use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{CardSelection, StoryPrompt};
 
@@ -24,8 +23,8 @@ fn read(conn: &Connection, id: i64) -> Result<StoryPrompt> {
         .map_err(|_| Error::invalid("story prompt not found"))
 }
 
-#[tauri::command]
-pub fn list_story_prompts(db: State<'_, Db>) -> Result<Vec<StoryPrompt>> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn list_story_prompts(db: DbState<'_>) -> Result<Vec<StoryPrompt>> {
     db.with(|conn| {
         let sql = format!("{PROMPT_SELECT} ORDER BY name");
         let mut stmt = conn.prepare(&sql)?;
@@ -34,8 +33,8 @@ pub fn list_story_prompts(db: State<'_, Db>) -> Result<Vec<StoryPrompt>> {
     })
 }
 
-#[tauri::command]
-pub fn create_story_prompt(db: State<'_, Db>, name: String, prompt: String) -> Result<StoryPrompt> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn create_story_prompt(db: DbState<'_>, name: String, prompt: String) -> Result<StoryPrompt> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err(Error::invalid("give the prompt a name"));
@@ -52,9 +51,9 @@ pub fn create_story_prompt(db: State<'_, Db>, name: String, prompt: String) -> R
     })
 }
 
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn update_story_prompt(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     id: i64,
     name: String,
     prompt: String,
@@ -75,8 +74,8 @@ pub fn update_story_prompt(
     })
 }
 
-#[tauri::command]
-pub fn delete_story_prompt(db: State<'_, Db>, id: i64) -> Result<()> {
+#[cfg_attr(not(test), tauri::command)]
+pub fn delete_story_prompt(db: DbState<'_>, id: i64) -> Result<()> {
     db.with(|conn| {
         conn.execute("DELETE FROM story_prompt WHERE id = ?1", params![id])?;
         Ok(())
@@ -107,9 +106,9 @@ pub struct StoryRequest {
 
 /// Builds the text the user pastes into an LLM: the chosen prompt, the response
 /// format, and the selected cards as JSON.
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn build_story_request(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     prompt_id: i64,
     selection: CardSelection,
 ) -> Result<StoryRequest> {
@@ -182,9 +181,9 @@ pub struct ApplyResult {
 
 /// Attaches the stories from an LLM reply to the cards of a deck. Entries are
 /// matched on the card index, falling back to an exact match on the front.
-#[tauri::command]
+#[cfg_attr(not(test), tauri::command)]
 pub fn apply_story_response(
-    db: State<'_, Db>,
+    db: DbState<'_>,
     deck_id: i64,
     response: String,
 ) -> Result<ApplyResult> {
