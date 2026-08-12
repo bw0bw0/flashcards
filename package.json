@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "android:init": "tauri android init && npm run android:signing",
+    "android:signing": "node scripts/setup-android-signing.mjs",
+    "android:keystore-base64": "node scripts/encode-android-keystore.mjs",
+    "android:build": "npm run android:signing && tauri android build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

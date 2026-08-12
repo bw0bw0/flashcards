@@ -67,6 +67,14 @@ jobs:
             npm run tauri -- android init --ci
           fi
 
+      - name: Configure Android release signing
+        if: github.event_name != 'pull_request'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: npm run android:signing
+
       - name: Build release APK
         run: npm run tauri -- android build --apk --ci
 
