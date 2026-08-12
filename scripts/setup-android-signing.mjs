@@ -86,14 +86,13 @@ writeFileSync(
 
 let gradle = readFileSync(appGradle, "utf8");
 
-if (!gradle.includes("import java.io.FileInputStream")) {
-  gradle = `import java.io.FileInputStream\nimport java.util.Properties\n${gradle}`;
-} else if (!gradle.includes("import java.util.Properties")) {
-  gradle = gradle.replace(
-    "import java.io.FileInputStream",
-    "import java.io.FileInputStream\nimport java.util.Properties",
-  );
+const requiredImports = ["import java.io.FileInputStream", "import java.util.Properties"];
+
+for (const importLine of requiredImports) {
+  gradle = gradle.replace(new RegExp(`^${importLine.replaceAll(".", "\\.")}\\r?\\n`, "gm"), "");
 }
+
+gradle = `${requiredImports.join("\n")}\n${gradle}`;
 
 if (!gradle.includes('create("release")')) {
   gradle = gradle.replace(
