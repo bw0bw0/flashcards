@@ -1,0 +1,97 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      CARGO_TERM_COLOR: always
+      ANDROID_NDK_VERSION: 27.2.12479018
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;${ANDROID_NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Initialize Tauri Android project
+        run: |
+          if [ ! -d src-tauri/gen/android ]; then
+            npm run tauri -- android init --ci
+          fi
+
+      - name: Build debug APK
+        run: npm run tauri -- android build --debug --apk --ci
+
+      - name: Prepare APK assets
+        run: |
+          mkdir -p release-apk
+          find src-tauri/gen/android/app/build/outputs/apk -name "*.apk" -exec cp {} release-apk/ \;
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: flashcards-android-apk
+          path: release-apk/*.apk
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: android-apk-${{ github.run_number }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-apk/*.apk --clobber
+          else
+            gh release create "$RELEASE_TAG" release-apk/*.apk \
+              --title "Flashcards Android APK #${{ github.run_number }}" \
+              --notes "Debug APK built from commit ${{ github.sha }}."
+          fi
