@@ -67,8 +67,8 @@ jobs:
             npm run tauri -- android init --ci
           fi
 
-      - name: Build debug APK
-        run: npm run tauri -- android build --debug --apk --ci
+      - name: Build release APK
+        run: npm run tauri -- android build --apk --ci
 
       - name: Prepare APK assets
         run: |
@@ -93,5 +93,5 @@ jobs:
           else
             gh release create "$RELEASE_TAG" release-apk/*.apk \
               --title "Flashcards Android APK #${{ github.run_number }}" \
-              --notes "Debug APK built from commit ${{ github.sha }}."
+              --notes "Release APK built from commit ${{ github.sha }}."
           fi
