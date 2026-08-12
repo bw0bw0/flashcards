@@ -46,6 +46,19 @@ export function SrDeckView({ deck, reloadDeck }: Props) {
           <button className="icon-btn" onClick={() => setDialog("edit")} aria-label="Edit deck">
             ✎
           </button>
+          <button
+            className="icon-btn"
+            aria-label="Delete deck"
+            onClick={async () => {
+              if (!confirm(`Delete "${deck.name}"? Its cards stay in their source decks.`)) {
+                return;
+              }
+              await action.run(() => api.deleteDeck(deck.id));
+              navigate("/");
+            }}
+          >
+            🗑
+          </button>
         </>
       }
     >

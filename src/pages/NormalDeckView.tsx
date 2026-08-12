@@ -20,6 +20,7 @@ interface Props {
 }
 
 export function NormalDeckView({ deck, reloadDeck }: Props) {
+  const navigate = useNavigate();
   const cards = useLoader(() => api.listCards(deck.id), [deck.id]);
   const categories = useLoader(() => api.listCategories(), []);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -43,9 +44,24 @@ export function NormalDeckView({ deck, reloadDeck }: Props) {
       subtitle={deck.categoryName ?? "No category"}
       back
       actions={
-        <button className="icon-btn" onClick={() => setDialog("edit")} aria-label="Edit deck">
-          ✎
-        </button>
+        <>
+          <button className="icon-btn" onClick={() => setDialog("edit")} aria-label="Edit deck">
+            ✎
+          </button>
+          <button
+            className="icon-btn"
+            aria-label="Delete deck"
+            onClick={async () => {
+              if (!confirm(`Delete "${deck.name}" and all ${deck.cardCount} of its cards?`)) {
+                return;
+              }
+              await action.run(() => api.deleteDeck(deck.id));
+              navigate("/");
+            }}
+          >
+            🗑
+          </button>
+        </>
       }
     >
       <ErrorBanner message={cards.error ?? action.error} />
