@@ -116,8 +116,58 @@ body {
 }
 
 .navbar .icon {
-  font-size: 1.15rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  display: inline-block;
+  position: relative;
   line-height: 1;
+}
+
+.navbar .icon::before,
+.navbar .icon::after {
+  content: "";
+  position: absolute;
+  border-color: currentColor;
+}
+
+.navbar .icon[data-icon="decks"]::before {
+  inset: 0.25rem 0.1rem 0.15rem;
+  border: 0.12rem solid currentColor;
+  border-radius: 0.12rem;
+}
+
+.navbar .icon[data-icon="decks"]::after {
+  width: 0.45rem;
+  height: 0.18rem;
+  top: 0.08rem;
+  left: 0.1rem;
+  border: 0.12rem solid currentColor;
+  border-bottom: 0;
+  border-radius: 0.12rem 0.12rem 0 0;
+}
+
+.navbar .icon[data-icon="study"]::before {
+  inset: 0.12rem;
+  border: 0.12rem solid currentColor;
+  border-radius: 50%;
+}
+
+.navbar .icon[data-icon="study"]::after {
+  inset: 0.4rem;
+  background: currentColor;
+  border-radius: 50%;
+}
+
+.navbar .icon[data-icon="prompts"]::before {
+  inset: 0.08rem 0.5rem;
+  background: currentColor;
+  border-radius: 999px;
+}
+
+.navbar .icon[data-icon="prompts"]::after {
+  inset: 0.5rem 0.08rem;
+  background: currentColor;
+  border-radius: 999px;
 }
 
 /* ---------- primitives ---------- */
