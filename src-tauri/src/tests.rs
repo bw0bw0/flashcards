@@ -283,6 +283,25 @@ fn grading_moves_a_card_through_the_queue() {
 }
 
 #[test]
+fn a_card_graded_again_does_not_immediately_repeat_while_other_cards_are_available() {
+    let db = db();
+    let source = deck_with_cards(&db, "Source", 3);
+    let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
+
+    let queue = sr::sr_queue(&db, sr_deck.id, None, None).unwrap();
+    assert_eq!(queue.len(), 3);
+    let first_id = queue[0].id;
+
+    // Grading anything but `Easy` sends the card into the learning queue with
+    // a due time a few minutes out. Since two other new cards are still
+    // available, the just-graded card must not jump back to the front.
+    sr::grade_sr_card(&db, first_id, Grade::Again).unwrap();
+    let queue = sr::sr_queue(&db, sr_deck.id, None, None).unwrap();
+    assert_eq!(queue.len(), 2);
+    assert!(queue.iter().all(|card| card.id != first_id));
+}
+
+#[test]
 fn the_queue_only_offers_cards_that_are_due() {
     let db = db();
     let source = deck_with_cards(&db, "Source", 1);

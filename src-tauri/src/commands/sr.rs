@@ -194,6 +194,11 @@ pub fn sr_queue(
         let limits = daily_limits(conn, sr_deck_id, &day_start_str)?;
         let mut cards = Vec::new();
 
+        // Only cards whose step has actually elapsed are "due" here; a card
+        // that was just graded Again/Hard/Good goes back into this same pool
+        // with a due time 1-10 minutes out, so it must NOT count as ready
+        // again until that time really passes. Otherwise it out-ranks every
+        // other card and the same card keeps coming back to back.
         let learning_sql = format!(
             "{SR_SELECT}
              WHERE s.sr_deck_id = ?1 AND s.state IN ('learning', 'relearning') AND s.due_at <= ?2
@@ -202,7 +207,7 @@ pub fn sr_queue(
         );
         let mut stmt = conn.prepare(&learning_sql)?;
         cards.extend(
-            stmt.query_map(params![sr_deck_id, ahead, overall_limit], sr_card_from_row)?
+            stmt.query_map(params![sr_deck_id, now_str, overall_limit], sr_card_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?,
         );
 
@@ -240,6 +245,24 @@ pub fn sr_queue(
             let mut stmt = conn.prepare(&new_sql)?;
             cards.extend(
                 stmt.query_map(params![sr_deck_id, new_remaining], sr_card_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+        }
+
+        // Nothing due right now, and nothing else to fill the session with:
+        // like Anki's "learn ahead" collapse, peek at learning/relearning
+        // cards that are about to become due rather than ending the session
+        // early with a card only a few minutes away.
+        if cards.is_empty() {
+            let ahead_sql = format!(
+                "{SR_SELECT}
+                 WHERE s.sr_deck_id = ?1 AND s.state IN ('learning', 'relearning') AND s.due_at <= ?2
+                 ORDER BY s.due_at, s.id
+                 LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&ahead_sql)?;
+            cards.extend(
+                stmt.query_map(params![sr_deck_id, ahead, overall_limit], sr_card_from_row)?
                     .collect::<rusqlite::Result<Vec<_>>>()?,
             );
         }
