@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::commands::{cards, decks, now_string};
 use crate::db::DbState;
 use crate::error::{Error, Result};
-use crate::models::{CardSelection, StoryPrompt};
+use crate::models::{Card, CardSelection, StoryPrompt};
 
 const PROMPT_SELECT: &str = "SELECT id, name, prompt, created_at FROM story_prompt";
 
@@ -96,6 +96,27 @@ Write one object per input card and keep them in the input order. Example:
 
 [{"index": 1, "story": "..."}, {"index": 2, "story": "..."}]"#;
 
+/// A card as the LLM sees it. Serialised from a struct rather than a map so the
+/// keys keep this order, with the index the reply must echo back first.
+#[derive(Debug, Serialize)]
+struct PromptCard<'a> {
+    index: i64,
+    front: &'a str,
+    back: &'a str,
+    comment: &'a str,
+}
+
+impl<'a> From<&'a Card> for PromptCard<'a> {
+    fn from(card: &'a Card) -> Self {
+        PromptCard {
+            index: card.idx,
+            front: &card.front,
+            back: &card.back,
+            comment: &card.comment,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoryRequest {
@@ -120,17 +141,7 @@ pub fn build_story_request(
             return Err(Error::invalid("that selection has no cards"));
         }
 
-        let payload = cards
-            .iter()
-            .map(|card| {
-                serde_json::json!({
-                    "index": card.idx,
-                    "front": card.front,
-                    "back": card.back,
-                    "comment": card.comment,
-                })
-            })
-            .collect::<Vec<_>>();
+        let payload = cards.iter().map(PromptCard::from).collect::<Vec<_>>();
 
         let range = match (cards.first(), cards.last()) {
             (Some(first), Some(last)) if first.idx != last.idx => {

@@ -146,6 +146,7 @@ fn cards_can_be_edited_reordered_and_exported() {
 
     let exported = cards::export_cards(&db, deck_id).unwrap();
     assert!(exported.contains("\"story\": \"a river runs through it\""));
+    assert!(exported.contains("\"index\": 1,\n    \"front\""));
 
     // What comes out of the export goes back in unchanged.
     let fresh = decks::create_deck(&db, "Copy".into(), None, None).unwrap();
@@ -308,6 +309,8 @@ fn a_story_request_carries_the_prompt_and_the_selected_cards() {
     assert!(request.text.contains("Write a short mnemonic."));
     assert!(request.text.contains("cards 2-4"));
     assert!(request.text.contains("\"front\": \"front 3\""));
+    // The index leads each card, since the reply has to echo it back.
+    assert!(request.text.contains("\"index\": 3,\n    \"front\""));
     assert!(!request.text.contains("front 5"));
 
     // An empty slice is a mistake worth reporting.

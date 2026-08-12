@@ -314,6 +314,29 @@ pub fn import_cards(
     })
 }
 
+/// A card on its way out. Serialised from a struct rather than a map so the keys
+/// come out in a readable order.
+#[derive(Debug, Serialize)]
+struct ExportCard<'a> {
+    index: i64,
+    front: &'a str,
+    back: &'a str,
+    comment: &'a str,
+    story: &'a str,
+}
+
+impl<'a> From<&'a Card> for ExportCard<'a> {
+    fn from(card: &'a Card) -> Self {
+        ExportCard {
+            index: card.idx,
+            front: &card.front,
+            back: &card.back,
+            comment: &card.comment,
+            story: &card.story,
+        }
+    }
+}
+
 /// Exports a deck in the same shape `import_cards` accepts.
 #[cfg_attr(not(test), tauri::command)]
 pub fn export_cards(db: DbState<'_>, deck_id: i64) -> Result<String> {
@@ -321,20 +344,9 @@ pub fn export_cards(db: DbState<'_>, deck_id: i64) -> Result<String> {
         let sql = format!("{CARD_SELECT} WHERE deck_id = ?1 ORDER BY idx");
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params![deck_id], card_from_row)?;
-        let cards = rows
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter()
-            .map(|card| {
-                serde_json::json!({
-                    "index": card.idx,
-                    "front": card.front,
-                    "back": card.back,
-                    "comment": card.comment,
-                    "story": card.story,
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(serde_json::to_string_pretty(&cards)?)
+        let cards = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let exported = cards.iter().map(ExportCard::from).collect::<Vec<_>>();
+        Ok(serde_json::to_string_pretty(&exported)?)
     })
 }
 
