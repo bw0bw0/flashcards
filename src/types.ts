@@ -18,6 +18,10 @@ export interface Deck {
   cardCount: number;
   dueCount: number;
   newCount: number;
+  /** SR decks only: new cards introduced per day. */
+  newPerDay: number;
+  /** SR decks only: review-state cards shown per day. */
+  reviewPerDay: number;
 }
 
 export interface Card {
@@ -62,11 +66,17 @@ export interface SrCard {
 
 export interface SrDeckStats {
   total: number;
+  /** Cards actually ready to study right now, respecting today's limits. */
   due: number;
+  /** Cards still in the 'new' state — the whole pool, not just today's slice. */
   new: number;
   learning: number;
   review: number;
   reviewedToday: number;
+  newPerDay: number;
+  reviewPerDay: number;
+  newRemainingToday: number;
+  reviewRemainingToday: number;
 }
 
 export type Grade = "again" | "hard" | "good" | "easy";

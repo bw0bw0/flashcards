@@ -86,9 +86,17 @@ export const api = {
   listSrCards: (srDeckId: number) => invoke<SrCard[]>("list_sr_cards", { srDeckId }),
   removeSrCards: (srCardIds: number[]) =>
     invoke<number>("remove_sr_cards", { srCardIds }),
-  srQueue: (srDeckId: number, limit?: number) =>
-    invoke<SrCard[]>("sr_queue", { srDeckId, limit: limit ?? null }),
+  srQueue: (srDeckId: number, limit?: number, reviewAheadDays?: number) =>
+    invoke<SrCard[]>("sr_queue", {
+      srDeckId,
+      limit: limit ?? null,
+      reviewAheadDays: reviewAheadDays ?? null,
+    }),
   srDeckStats: (srDeckId: number) => invoke<SrDeckStats>("sr_deck_stats", { srDeckId }),
+  increaseSrLimits: (srDeckId: number, extraNew: number, extraReview: number) =>
+    invoke<SrDeckStats>("increase_sr_limits", { srDeckId, extraNew, extraReview }),
+  updateSrDeckSettings: (srDeckId: number, newPerDay: number, reviewPerDay: number) =>
+    invoke<Deck>("update_sr_deck_settings", { srDeckId, newPerDay, reviewPerDay }),
   gradeSrCard: (srCardId: number, grade: Grade) =>
     invoke<GradeResult>("grade_sr_card", { srCardId, grade }),
   resetSrCard: (srCardId: number) => invoke<void>("reset_sr_card", { srCardId }),

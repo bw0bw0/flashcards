@@ -48,6 +48,10 @@ pub struct Deck {
     pub due_count: i64,
     /// SR decks only: cards that have never been reviewed.
     pub new_count: i64,
+    /// SR decks only: how many new cards may be introduced per day.
+    pub new_per_day: i64,
+    /// SR decks only: how many review-state cards may be shown per day.
+    pub review_per_day: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,9 +109,20 @@ pub struct SrCard {
 #[serde(rename_all = "camelCase")]
 pub struct SrDeckStats {
     pub total: i64,
+    /// Cards actually ready to study right now: due learning/relearning cards,
+    /// plus however many review and new cards today's limits still allow.
     pub due: i64,
+    /// Cards still sitting in the 'new' state (the whole pool, not just what
+    /// today's limit allows through).
     pub new: i64,
     pub learning: i64,
     pub review: i64,
+    /// Every card graded today, any state, calendar-day based.
     pub reviewed_today: i64,
+    pub new_per_day: i64,
+    pub review_per_day: i64,
+    /// How many more new cards may be introduced today.
+    pub new_remaining_today: i64,
+    /// How many more review-state cards may be shown today.
+    pub review_remaining_today: i64,
 }

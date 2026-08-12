@@ -15,7 +15,8 @@ const DECK_SELECT: &str = "
            (SELECT COUNT(*) FROM sr_card s WHERE s.sr_deck_id = d.id AND s.due_at <= ?1)
                AS due_count,
            (SELECT COUNT(*) FROM sr_card s WHERE s.sr_deck_id = d.id AND s.state = 'new')
-               AS new_count
+               AS new_count,
+           d.new_per_day, d.review_per_day
     FROM deck d
     LEFT JOIN category c ON c.id = d.category_id";
 
@@ -33,6 +34,8 @@ fn deck_from_row(row: &Row) -> rusqlite::Result<Deck> {
         card_count: row.get(8)?,
         due_count: row.get(9)?,
         new_count: row.get(10)?,
+        new_per_day: row.get(11)?,
+        review_per_day: row.get(12)?,
     })
 }
 

@@ -253,7 +253,7 @@ fn grading_moves_a_card_through_the_queue() {
     let source = deck_with_cards(&db, "Source", 2);
     let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
 
-    let queue = sr::sr_queue(&db, sr_deck.id, None).unwrap();
+    let queue = sr::sr_queue(&db, sr_deck.id, None, None).unwrap();
     assert_eq!(queue.len(), 2);
 
     // `Easy` graduates a new card straight into the review queue, days away.
@@ -272,7 +272,7 @@ fn grading_moves_a_card_through_the_queue() {
     // queue reaches a little way into the future for learning cards.
     let result = sr::grade_sr_card(&db, queue[1].id, Grade::Again).unwrap();
     assert_eq!(result.card.state, "learning");
-    let queue = sr::sr_queue(&db, sr_deck.id, None).unwrap();
+    let queue = sr::sr_queue(&db, sr_deck.id, None, None).unwrap();
     assert_eq!(queue.len(), 1);
     assert_eq!(queue[0].id, result.card.id);
 
@@ -287,13 +287,62 @@ fn the_queue_only_offers_cards_that_are_due() {
     let db = db();
     let source = deck_with_cards(&db, "Source", 1);
     let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
-    let entry = sr::sr_queue(&db, sr_deck.id, None).unwrap()[0].id;
+    let entry = sr::sr_queue(&db, sr_deck.id, None, None).unwrap()[0].id;
 
     sr::grade_sr_card(&db, entry, Grade::Easy).unwrap();
-    assert!(sr::sr_queue(&db, sr_deck.id, None).unwrap().is_empty());
+    assert!(sr::sr_queue(&db, sr_deck.id, None, None).unwrap().is_empty());
 
     // A story deck has no queue at all.
-    assert!(sr::sr_queue(&db, source, None).is_err());
+    assert!(sr::sr_queue(&db, source, None, None).is_err());
+}
+
+#[test]
+fn new_cards_trickle_in_by_the_daily_limit() {
+    let db = db();
+    let source = deck_with_cards(&db, "Source", 10);
+    let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
+    sr::update_sr_deck_settings(&db, sr_deck.id, 3, 200).unwrap();
+
+    // Only 3 of the 10 new cards are offered, even though all 10 are "due".
+    let queue = sr::sr_queue(&db, sr_deck.id, None, None).unwrap();
+    assert_eq!(queue.len(), 3);
+    let stats = sr::sr_deck_stats(&db, sr_deck.id).unwrap();
+    assert_eq!(stats.due, 3);
+    assert_eq!(stats.new, 10);
+    assert_eq!(stats.new_remaining_today, 3);
+
+    // Using up today's allowance empties the queue, even with 7 cards left.
+    for card in &queue {
+        sr::grade_sr_card(&db, card.id, Grade::Easy).unwrap();
+    }
+    assert!(sr::sr_queue(&db, sr_deck.id, None, None).unwrap().is_empty());
+    let stats = sr::sr_deck_stats(&db, sr_deck.id).unwrap();
+    assert_eq!(stats.new_remaining_today, 0);
+    assert_eq!(stats.due, 0);
+
+    // "Increase today's limit" lets more through without touching the
+    // permanent per-day setting.
+    let bumped = sr::increase_sr_limits(&db, sr_deck.id, 2, 0).unwrap();
+    assert_eq!(bumped.new_remaining_today, 2);
+    assert_eq!(sr::sr_queue(&db, sr_deck.id, None, None).unwrap().len(), 2);
+    assert_eq!(decks::get_deck(&db, sr_deck.id).unwrap().new_per_day, 3);
+}
+
+#[test]
+fn reviewing_ahead_pulls_in_cards_due_later() {
+    let db = db();
+    let source = deck_with_cards(&db, "Source", 1);
+    let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
+    let card_id = sr::sr_queue(&db, sr_deck.id, None, None).unwrap()[0].id;
+    sr::grade_sr_card(&db, card_id, Grade::Easy).unwrap(); // due 4 days out
+
+    assert!(sr::sr_queue(&db, sr_deck.id, None, None).unwrap().is_empty());
+    // Not far enough ahead yet...
+    assert!(sr::sr_queue(&db, sr_deck.id, None, Some(2)).unwrap().is_empty());
+    // ...but far enough now.
+    let ahead = sr::sr_queue(&db, sr_deck.id, None, Some(5)).unwrap();
+    assert_eq!(ahead.len(), 1);
+    assert_eq!(ahead[0].id, card_id);
 }
 
 #[test]

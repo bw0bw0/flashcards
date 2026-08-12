@@ -48,7 +48,10 @@ fn prepare(conn: &Connection) -> Result<()> {
 }
 
 /// Ordered list of migrations. Never edit an existing entry, only append.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/0001_initial.sql"),
+    include_str!("migrations/0002_sr_daily_limits.sql"),
+];
 
 fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;

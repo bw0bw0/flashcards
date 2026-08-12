@@ -1,8 +1,8 @@
-﻿use chrono::{Duration, Utc};
+﻿use chrono::{DateTime, Duration, Utc};
 use rusqlite::{params, Connection, Row};
 use serde::Serialize;
 
-use crate::commands::{cards, decks, now_string, parse_time, to_string};
+use crate::commands::{cards, day_start, decks, now_string, parse_time, to_string, today_key};
 use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{Card, CardSelection, Deck, DeckKind, SrCard, SrDeckStats};
@@ -11,6 +11,56 @@ use crate::srs::{self, Grade, Schedule, State as SrState};
 /// How far into the future a learning card may be pulled forward, so that a
 /// card you just failed comes back inside the same session.
 const LEARN_AHEAD_MINUTES: i64 = 20;
+
+/// Today's effective new/review caps for a deck, and how much of each has
+/// already been used today.
+#[derive(Debug, Clone, Copy)]
+struct DailyLimits {
+    new_per_day: i64,
+    review_per_day: i64,
+    new_studied_today: i64,
+    reviews_today: i64,
+}
+
+impl DailyLimits {
+    fn new_remaining(&self) -> i64 {
+        (self.new_per_day - self.new_studied_today).max(0)
+    }
+
+    fn review_remaining(&self) -> i64 {
+        (self.review_per_day - self.reviews_today).max(0)
+    }
+}
+
+/// Reads a deck's daily caps, folding in any "increase today's limit" bump
+/// that still applies, plus how much of each cap is already spent today.
+fn daily_limits(conn: &Connection, sr_deck_id: i64, day_start_str: &str) -> Result<DailyLimits> {
+    conn.query_row(
+        "SELECT d.new_per_day
+                    + CASE WHEN d.extra_today_date = ?2 THEN d.extra_new_today ELSE 0 END,
+                d.review_per_day
+                    + CASE WHEN d.extra_today_date = ?2 THEN d.extra_review_today ELSE 0 END,
+                (SELECT COUNT(*) FROM sr_card s
+                    WHERE s.sr_deck_id = d.id AND s.first_studied_at >= ?3),
+                -- Only review-state reviews count against the review cap;
+                -- learning/relearning steps happen automatically until a card
+                -- graduates and are not subject to a daily limit.
+                (SELECT COUNT(*) FROM review_log r
+                    JOIN sr_card s ON s.id = r.sr_card_id
+                    WHERE s.sr_deck_id = d.id AND s.state = 'review' AND r.reviewed_at >= ?3)
+         FROM deck d WHERE d.id = ?1",
+        params![sr_deck_id, today_key(), day_start_str],
+        |row| {
+            Ok(DailyLimits {
+                new_per_day: row.get(0)?,
+                review_per_day: row.get(1)?,
+                new_studied_today: row.get(2)?,
+                reviews_today: row.get(3)?,
+            })
+        },
+    )
+    .map_err(|_| Error::invalid("deck not found"))
+}
 
 const SR_SELECT: &str = "
     SELECT s.id, s.sr_deck_id, s.state, s.due_at, s.interval_days, s.ease, s.reps, s.lapses,
@@ -113,45 +163,120 @@ pub fn remove_sr_cards(db: DbState<'_>, sr_card_ids: Vec<i64>) -> Result<usize> 
     })
 }
 
-/// The study queue: cards that are due now, followed by learning cards due in
-/// the next few minutes.
+/// The study queue: due learning/relearning cards first (uncapped, since they
+/// need to be seen again to graduate), then due review cards, then new cards
+/// — the last two capped by whatever today's daily limits still allow.
+///
+/// `review_ahead_days`, when positive, pulls in review cards due within that
+/// many days instead of only ones due now, and lifts the review cap for the
+/// session, mirroring Anki's "review ahead" custom study option.
 #[cfg_attr(not(test), tauri::command)]
-pub fn sr_queue(db: DbState<'_>, sr_deck_id: i64, limit: Option<i64>) -> Result<Vec<SrCard>> {
+pub fn sr_queue(
+    db: DbState<'_>,
+    sr_deck_id: i64,
+    limit: Option<i64>,
+    review_ahead_days: Option<i64>,
+) -> Result<Vec<SrCard>> {
     let now = Utc::now();
     let now_str = to_string(now);
     let ahead = to_string(now + Duration::minutes(LEARN_AHEAD_MINUTES));
+    let review_ahead_days = review_ahead_days.unwrap_or(0).max(0);
+    let review_cutoff = if review_ahead_days > 0 {
+        to_string(now + Duration::days(review_ahead_days))
+    } else {
+        now_str.clone()
+    };
+    let overall_limit = limit.unwrap_or(100);
+    let day_start_str = to_string(day_start());
+
     db.with(|conn| {
         decks::require_kind(conn, sr_deck_id, DeckKind::Sr)?;
-        let sql = format!(
+        let limits = daily_limits(conn, sr_deck_id, &day_start_str)?;
+        let mut cards = Vec::new();
+
+        let learning_sql = format!(
             "{SR_SELECT}
-             WHERE s.sr_deck_id = ?1
-               AND (s.due_at <= ?2
-                    OR (s.state IN ('learning', 'relearning') AND s.due_at <= ?3))
-             ORDER BY (s.due_at <= ?2) DESC, s.due_at, s.id
-             LIMIT ?4"
+             WHERE s.sr_deck_id = ?1 AND s.state IN ('learning', 'relearning') AND s.due_at <= ?2
+             ORDER BY s.due_at, s.id
+             LIMIT ?3"
         );
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            params![sr_deck_id, now_str, ahead, limit.unwrap_or(100)],
-            sr_card_from_row,
-        )?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut stmt = conn.prepare(&learning_sql)?;
+        cards.extend(
+            stmt.query_map(params![sr_deck_id, ahead, overall_limit], sr_card_from_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+
+        let review_remaining = if review_ahead_days > 0 {
+            overall_limit - cards.len() as i64
+        } else {
+            limits.review_remaining().min(overall_limit - cards.len() as i64)
+        }
+        .max(0);
+        if review_remaining > 0 {
+            let review_sql = format!(
+                "{SR_SELECT}
+                 WHERE s.sr_deck_id = ?1 AND s.state = 'review' AND s.due_at <= ?2
+                 ORDER BY s.due_at, s.id
+                 LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&review_sql)?;
+            cards.extend(
+                stmt.query_map(
+                    params![sr_deck_id, review_cutoff, review_remaining],
+                    sr_card_from_row,
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+        }
+
+        let new_remaining = limits.new_remaining().min(overall_limit - cards.len() as i64).max(0);
+        if new_remaining > 0 {
+            let new_sql = format!(
+                "{SR_SELECT}
+                 WHERE s.sr_deck_id = ?1 AND s.state = 'new'
+                 ORDER BY d.name, k.idx
+                 LIMIT ?2"
+            );
+            let mut stmt = conn.prepare(&new_sql)?;
+            cards.extend(
+                stmt.query_map(params![sr_deck_id, new_remaining], sr_card_from_row)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
+        }
+
+        Ok(cards)
     })
 }
 
-#[cfg_attr(not(test), tauri::command)]
-pub fn sr_deck_stats(db: DbState<'_>, sr_deck_id: i64) -> Result<SrDeckStats> {
-    let now = now_string();
-    let today = to_string(Utc::now() - Duration::hours(24));
-    db.with(|conn| {
-        let (total, due, new, learning, review) = conn.query_row(
+/// Shared by the `sr_deck_stats` command and `increase_sr_limits`, which needs
+/// fresh stats after it bumps a deck's limits.
+fn compute_stats(conn: &Connection, sr_deck_id: i64, now: DateTime<Utc>) -> Result<SrDeckStats> {
+    let now_str = to_string(now);
+    let ahead = to_string(now + Duration::minutes(LEARN_AHEAD_MINUTES));
+    let day_start_str = to_string(day_start());
+    let limits = daily_limits(conn, sr_deck_id, &day_start_str)?;
+
+    let (total, new_raw, learning, review_raw, learning_due, review_due, reviewed_today): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = conn
+        .query_row(
             "SELECT COUNT(*),
-                    COUNT(*) FILTER (WHERE due_at <= ?2),
                     COUNT(*) FILTER (WHERE state = 'new'),
                     COUNT(*) FILTER (WHERE state IN ('learning', 'relearning')),
-                    COUNT(*) FILTER (WHERE state = 'review')
+                    COUNT(*) FILTER (WHERE state = 'review'),
+                    COUNT(*) FILTER (WHERE state IN ('learning', 'relearning') AND due_at <= ?3),
+                    COUNT(*) FILTER (WHERE state = 'review' AND due_at <= ?2),
+                    (SELECT COUNT(*) FROM review_log r
+                        WHERE r.sr_card_id IN (SELECT id FROM sr_card WHERE sr_deck_id = ?1)
+                          AND r.reviewed_at >= ?4)
              FROM sr_card WHERE sr_deck_id = ?1",
-            params![sr_deck_id, now],
+            params![sr_deck_id, now_str, ahead, day_start_str],
             |row| {
                 Ok((
                     row.get(0)?,
@@ -159,24 +284,79 @@ pub fn sr_deck_stats(db: DbState<'_>, sr_deck_id: i64) -> Result<SrDeckStats> {
                     row.get(2)?,
                     row.get(3)?,
                     row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )?;
-        let reviewed_today: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM review_log r
-             JOIN sr_card s ON s.id = r.sr_card_id
-             WHERE s.sr_deck_id = ?1 AND r.reviewed_at >= ?2",
-            params![sr_deck_id, today],
-            |row| row.get(0),
+
+    let new_remaining_today = limits.new_remaining();
+    let review_remaining_today = limits.review_remaining();
+    let ready_now =
+        learning_due + review_due.min(review_remaining_today) + new_raw.min(new_remaining_today);
+
+    Ok(SrDeckStats {
+        total,
+        due: ready_now,
+        new: new_raw,
+        learning,
+        review: review_raw,
+        reviewed_today,
+        new_per_day: limits.new_per_day,
+        review_per_day: limits.review_per_day,
+        new_remaining_today,
+        review_remaining_today,
+    })
+}
+
+#[cfg_attr(not(test), tauri::command)]
+pub fn sr_deck_stats(db: DbState<'_>, sr_deck_id: i64) -> Result<SrDeckStats> {
+    db.with(|conn| compute_stats(conn, sr_deck_id, Utc::now()))
+}
+
+/// A one-off bump to today's new/review limits ("increase today's limit" in
+/// Anki), so a deck that ran out mid-session can keep going without changing
+/// the deck's permanent daily settings.
+#[cfg_attr(not(test), tauri::command)]
+pub fn increase_sr_limits(
+    db: DbState<'_>,
+    sr_deck_id: i64,
+    extra_new: i64,
+    extra_review: i64,
+) -> Result<SrDeckStats> {
+    db.with(|conn| {
+        decks::require_kind(conn, sr_deck_id, DeckKind::Sr)?;
+        let today = today_key();
+        conn.execute(
+            "UPDATE deck
+             SET extra_new_today = (CASE WHEN extra_today_date = ?2 THEN extra_new_today ELSE 0 END) + ?3,
+                 extra_review_today = (CASE WHEN extra_today_date = ?2 THEN extra_review_today ELSE 0 END) + ?4,
+                 extra_today_date = ?2
+             WHERE id = ?1",
+            params![sr_deck_id, today, extra_new.max(0), extra_review.max(0)],
         )?;
-        Ok(SrDeckStats {
-            total,
-            due,
-            new,
-            learning,
-            review,
-            reviewed_today,
-        })
+        compute_stats(conn, sr_deck_id, Utc::now())
+    })
+}
+
+/// Sets a deck's permanent daily new-card and review limits.
+#[cfg_attr(not(test), tauri::command)]
+pub fn update_sr_deck_settings(
+    db: DbState<'_>,
+    sr_deck_id: i64,
+    new_per_day: i64,
+    review_per_day: i64,
+) -> Result<Deck> {
+    if new_per_day < 0 || review_per_day < 0 {
+        return Err(Error::invalid("limits cannot be negative"));
+    }
+    db.with(|conn| {
+        decks::require_kind(conn, sr_deck_id, DeckKind::Sr)?;
+        conn.execute(
+            "UPDATE deck SET new_per_day = ?2, review_per_day = ?3 WHERE id = ?1",
+            params![sr_deck_id, new_per_day, review_per_day],
+        )?;
+        decks::read(conn, sr_deck_id)
     })
 }
 
@@ -228,10 +408,15 @@ pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<G
             .map_err(|_| Error::invalid("card is not in this deck"))?;
 
         let next = srs::review(previous, grade, now);
+        let leaving_new = previous.state == SrState::New;
         conn.execute(
             "UPDATE sr_card
              SET state = ?2, step = ?3, interval_days = ?4, ease = ?5, reps = ?6, lapses = ?7,
-                 due_at = ?8, last_reviewed_at = ?9
+                 due_at = ?8, last_reviewed_at = ?9,
+                 first_studied_at = CASE
+                     WHEN first_studied_at IS NULL AND ?10 THEN ?9
+                     ELSE first_studied_at
+                 END
              WHERE id = ?1",
             params![
                 sr_card_id,
@@ -242,7 +427,8 @@ pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<G
                 next.reps,
                 next.lapses,
                 to_string(next.due_at),
-                to_string(now)
+                to_string(now),
+                leaving_new
             ],
         )?;
         conn.execute(
@@ -273,7 +459,7 @@ pub fn reset_sr_card(db: DbState<'_>, sr_card_id: i64) -> Result<()> {
         conn.execute(
             "UPDATE sr_card
              SET state = ?2, step = ?3, interval_days = ?4, ease = ?5, reps = ?6, lapses = ?7,
-                 due_at = ?8, last_reviewed_at = NULL
+                 due_at = ?8, last_reviewed_at = NULL, first_studied_at = NULL
              WHERE id = ?1",
             params![
                 sr_card_id,

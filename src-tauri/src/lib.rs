@@ -47,6 +47,8 @@ pub fn run() {
             commands::sr::remove_sr_cards,
             commands::sr::sr_queue,
             commands::sr::sr_deck_stats,
+            commands::sr::increase_sr_limits,
+            commands::sr::update_sr_deck_settings,
             commands::sr::grade_sr_card,
             commands::sr::reset_sr_card,
             commands::prompts::list_story_prompts,

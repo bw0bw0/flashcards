@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 import { api } from "../api";
 import { CardFace } from "../components/CardFace";
@@ -18,9 +18,14 @@ const GRADES: { grade: Grade; label: string; className: string; key: string }[] 
 export function SrTrainer() {
   const { deckId } = useParams();
   const id = Number(deckId);
+  const [searchParams] = useSearchParams();
+  const reviewAheadDays = Number(searchParams.get("ahead") ?? 0) || undefined;
 
   const deck = useLoader(() => api.getDeck(id), [id]);
-  const queue = useLoader(() => api.srQueue(id), [id]);
+  const queue = useLoader(
+    () => api.srQueue(id, undefined, reviewAheadDays),
+    [id, reviewAheadDays],
+  );
   const [revealed, setRevealed] = useState(false);
   const [reviewed, setReviewed] = useState(0);
   const [last, setLast] = useState<string | null>(null);
@@ -61,7 +66,11 @@ export function SrTrainer() {
   return (
     <Screen
       title={deck.data?.name ?? "Review"}
-      subtitle={`Spaced repetition · ${reviewed} reviewed`}
+      subtitle={
+        reviewAheadDays
+          ? `Reviewing ahead · ${reviewed} reviewed`
+          : `Spaced repetition · ${reviewed} reviewed`
+      }
       back
     >
       <ErrorBanner message={queue.error ?? deck.error ?? action.error} />
