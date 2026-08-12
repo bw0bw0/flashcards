@@ -486,6 +486,7 @@ input[type="checkbox"] {
   flex: 1;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 16px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -533,6 +534,8 @@ input[type="checkbox"] {
 }
 
 .flashcard .hint {
+  /* Pinned to the bottom of the card, whatever the front is. */
+  margin-top: auto;
   text-align: center;
   color: var(--muted);
   font-size: 0.8rem;

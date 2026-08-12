@@ -32,10 +32,7 @@ export function CardFace({ card, revealed, onReveal }: Props) {
           {card.story && <div className="story">{card.story}</div>}
         </>
       ) : (
-        <>
-          <div className="spacer" />
-          <div className="hint">Tap the card to reveal</div>
-        </>
+        <div className="hint">Tap the card to reveal</div>
       )}
     </div>
   );
