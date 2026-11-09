@@ -1,0 +1,15 @@
+# systemd user unit for the flashcards server.
+# Change WorkingDirectory to where this repository's server/ folder is, then:
+#   cp flashcards-server.service ~/.config/systemd/user/
+#   systemctl --user enable --now flashcards-server
+[Unit]
+Description=Flashcards server
+After=network.target
+
+[Service]
+WorkingDirectory=%h/flashcards/server
+ExecStart=/usr/bin/env node src/main.ts
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

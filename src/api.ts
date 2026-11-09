@@ -1,9 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
 import {
   writeText as writeClipboard,
   readText as readClipboard,
 } from "@tauri-apps/plugin-clipboard-manager";
 
+import { getServerUrl } from "./server";
 import type {
   ApplyResult,
   Card,
@@ -19,11 +19,51 @@ import type {
   StoryRequest,
 } from "./types";
 
-/** Every backend error arrives as a plain string. */
+/** Every server error arrives as a plain message. */
 export function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/**
+ * Calls a command on the server: `POST /api/<command>` with the arguments as
+ * JSON. Failures reject with a readable message.
+ */
+async function invoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+  const base = getServerUrl();
+  if (!base) throw new Error("no server is set up");
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/${command}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+  } catch {
+    throw new Error(
+      `Can't reach the server at ${base}. Is it running, and is this device on Tailscale?`,
+    );
+  }
+  let body: unknown = null;
+  try {
+    body = await res.json();
+  } catch {
+    if (res.ok) throw new Error("the server sent a reply that is not JSON");
+  }
+  if (!res.ok) {
+    const message =
+      body && typeof body === "object" && "error" in body
+        ? String((body as { error: unknown }).error)
+        : `the server answered ${res.status} ${res.statusText}`;
+    throw new Error(message);
+  }
+  return body as T;
+}
+
+export interface ImportDatabaseResult {
+  /** Where the server kept its previous data, if it had any. */
+  backup: string | null;
 }
 
 export const api = {
@@ -111,6 +151,10 @@ export const api = {
     invoke<StoryRequest>("build_story_request", { promptId, selection }),
   applyStoryResponse: (deckId: number, response: string) =>
     invoke<ApplyResult>("apply_story_response", { deckId, response }),
+
+  /** Replaces the server's data with the database of the old local-only app. */
+  importDatabase: (database: string, wal: string | null, force: boolean) =>
+    invoke<ImportDatabaseResult>("import_database", { database, wal, force }),
 };
 
 /**

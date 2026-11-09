@@ -22,7 +22,19 @@ export function DecksPage() {
   const groups = groupByCategory(all, categories.data ?? []);
 
   return (
-    <Screen title="Decks">
+    <Screen
+      title="Decks"
+      actions={
+        <button
+          className="icon-btn"
+          onClick={() => navigate("/settings")}
+          aria-label="Server settings"
+          title="Server settings"
+        >
+          ⚙
+        </button>
+      }
+    >
       <ErrorBanner message={decks.error ?? categories.error} />
 
       {all.length === 0 && !decks.loading && (

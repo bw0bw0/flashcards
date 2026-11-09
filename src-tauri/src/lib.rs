@@ -1,62 +1,79 @@
-mod commands;
-mod db;
-mod error;
-mod models;
-mod srs;
-#[cfg(test)]
-mod tests;
+//! The app is a client of the flashcards server (see `server/`), which owns
+//! all the data. The only thing left on the device is, for people upgrading,
+//! the database the app used to keep locally; these commands hand it over so
+//! the setup screen can upload it to the server once.
 
-/// The commands are plain functions under `cargo test` (see `db::DbState`), so
-/// the Tauri wiring is only compiled for the real build.
-#[cfg(not(test))]
+use std::path::PathBuf;
+
+use tauri::{ipc::Response, AppHandle, Manager, Runtime};
+
+/// Where the local-only versions of the app kept their database.
+fn legacy_database<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(dir.join("flashcards.db"))
+}
+
+fn with_suffix(path: &std::path::Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+/// Size in bytes of the old local database, or `None` if there is none.
+#[tauri::command]
+fn legacy_database_size<R: Runtime>(app: AppHandle<R>) -> Result<Option<u64>, String> {
+    let path = legacy_database(&app)?;
+    match std::fs::metadata(&path) {
+        Ok(meta) if meta.len() > 0 => Ok(Some(meta.len())),
+        _ => Ok(None),
+    }
+}
+
+/// The raw bytes of the old database (`part = "database"`) or of its
+/// write-ahead log (`part = "wal"`, empty if there is none). The log can hold
+/// recent changes that never made it into the main file, so both are sent.
+#[tauri::command]
+fn read_legacy_database<R: Runtime>(app: AppHandle<R>, part: String) -> Result<Response, String> {
+    let path = legacy_database(&app)?;
+    let path = match part.as_str() {
+        "database" => path,
+        "wal" => with_suffix(&path, "-wal"),
+        _ => return Err(format!("unknown part `{part}`")),
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(Response::new(bytes)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && part == "wal" => {
+            Ok(Response::new(Vec::new()))
+        }
+        Err(e) => Err(format!("could not read {}: {e}", path.display())),
+    }
+}
+
+/// Renames the old database once it has been uploaded, so the upload is not
+/// offered again. The files are kept, just out of the way.
+#[tauri::command]
+fn archive_legacy_database<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    let path = legacy_database(&app)?;
+    for suffix in ["", "-wal", "-shm"] {
+        let from = with_suffix(&path, suffix);
+        if from.exists() {
+            let to = with_suffix(&path, &format!(".uploaded{suffix}"));
+            std::fs::rename(&from, &to)
+                .map_err(|e| format!("could not rename {}: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    use crate::db::Db;
-    use tauri::Manager;
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .setup(|app| {
-            let dir = app.path().app_data_dir()?;
-            std::fs::create_dir_all(&dir)?;
-            app.manage(Db::open(&dir.join("flashcards.db"))?);
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
-            commands::categories::list_categories,
-            commands::categories::create_category,
-            commands::categories::update_category,
-            commands::categories::delete_category,
-            commands::decks::list_decks,
-            commands::decks::get_deck,
-            commands::decks::create_deck,
-            commands::decks::update_deck,
-            commands::decks::delete_deck,
-            commands::cards::list_cards,
-            commands::cards::list_selection,
-            commands::cards::create_card,
-            commands::cards::update_card,
-            commands::cards::delete_card,
-            commands::cards::move_card,
-            commands::cards::import_cards,
-            commands::cards::export_cards,
-            commands::sr::create_sr_deck,
-            commands::sr::add_to_sr_deck,
-            commands::sr::list_sr_cards,
-            commands::sr::remove_sr_cards,
-            commands::sr::sr_queue,
-            commands::sr::sr_deck_stats,
-            commands::sr::increase_sr_limits,
-            commands::sr::update_sr_deck_settings,
-            commands::sr::grade_sr_card,
-            commands::sr::reset_sr_card,
-            commands::prompts::list_story_prompts,
-            commands::prompts::create_story_prompt,
-            commands::prompts::update_story_prompt,
-            commands::prompts::delete_story_prompt,
-            commands::prompts::build_story_request,
-            commands::prompts::apply_story_response,
+            legacy_database_size,
+            read_legacy_database,
+            archive_legacy_database,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -172,6 +172,18 @@ body {
 
 /* ---------- primitives ---------- */
 
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notice code,
+.error-banner code {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);

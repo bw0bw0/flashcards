@@ -1,0 +1,20 @@
+{
+  "name": "flashcards-server",
+  "private": true,
+  "version": "0.2.0",
+  "license": "AGPL-3.0-or-later",
+  "description": "The flashcards app's server: owns the SQLite database and the Anki scheduler.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test 'test/**/*.test.ts'",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "~5.8.3"
+  }
+}
