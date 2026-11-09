@@ -259,7 +259,9 @@ fn grading_moves_a_card_through_the_queue() {
     // `Easy` graduates a new card straight into the review queue, days away.
     let result = sr::grade_sr_card(&db, queue[0].id, Grade::Easy).unwrap();
     assert_eq!(result.card.state, "review");
-    assert_eq!(result.next_due_in, "4d");
+    // Anki's easy interval of 4 days, fuzzed to 3-5.
+    assert!((3.0..=5.0).contains(&result.card.interval_days));
+    assert_eq!(result.next_due_in, format!("{}d", result.card.interval_days));
 
     let stats = sr::sr_deck_stats(&db, sr_deck.id).unwrap();
     assert_eq!(stats.total, 2);
@@ -348,12 +350,32 @@ fn new_cards_trickle_in_by_the_daily_limit() {
 }
 
 #[test]
+fn learning_a_new_card_does_not_use_up_the_review_limit() {
+    let db = db();
+    let source = deck_with_cards(&db, "Source", 1);
+    let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
+    sr::update_sr_deck_settings(&db, sr_deck.id, 20, 5).unwrap();
+    let card_id = sr::sr_queue(&db, sr_deck.id, None, None).unwrap()[0].id;
+
+    // Three learning answers, ending in graduation to the review state.
+    sr::grade_sr_card(&db, card_id, Grade::Again).unwrap();
+    sr::grade_sr_card(&db, card_id, Grade::Good).unwrap();
+    let result = sr::grade_sr_card(&db, card_id, Grade::Good).unwrap();
+    assert_eq!(result.card.state, "review");
+    assert_eq!(result.card.interval_days, 1.0);
+    assert_eq!(result.next_due_in, "1d");
+
+    let stats = sr::sr_deck_stats(&db, sr_deck.id).unwrap();
+    assert_eq!(stats.review_remaining_today, 5);
+}
+
+#[test]
 fn reviewing_ahead_pulls_in_cards_due_later() {
     let db = db();
     let source = deck_with_cards(&db, "Source", 1);
     let sr_deck = sr::create_sr_deck(&db, "Daily".into(), None, None, vec![whole(source)]).unwrap();
     let card_id = sr::sr_queue(&db, sr_deck.id, None, None).unwrap()[0].id;
-    sr::grade_sr_card(&db, card_id, Grade::Easy).unwrap(); // due 4 days out
+    sr::grade_sr_card(&db, card_id, Grade::Easy).unwrap(); // due 3-5 days out
 
     assert!(sr::sr_queue(&db, sr_deck.id, None, None).unwrap().is_empty());
     // Not far enough ahead yet...

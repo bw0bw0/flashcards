@@ -2,7 +2,9 @@
 use rusqlite::{params, Connection, Row};
 use serde::Serialize;
 
-use crate::commands::{cards, day_start, decks, now_string, parse_time, to_string, today_key};
+use crate::commands::{
+    cards, day_start, day_start_in, days_since, decks, now_string, parse_time, to_string, today_key,
+};
 use crate::db::DbState;
 use crate::error::{Error, Result};
 use crate::models::{Card, CardSelection, Deck, DeckKind, SrCard, SrDeckStats};
@@ -42,12 +44,12 @@ fn daily_limits(conn: &Connection, sr_deck_id: i64, day_start_str: &str) -> Resu
                     + CASE WHEN d.extra_today_date = ?2 THEN d.extra_review_today ELSE 0 END,
                 (SELECT COUNT(*) FROM sr_card s
                     WHERE s.sr_deck_id = d.id AND s.first_studied_at >= ?3),
-                -- Only review-state reviews count against the review cap;
-                -- learning/relearning steps happen automatically until a card
-                -- graduates and are not subject to a daily limit.
+                -- Only answers to cards that were in the review state at the
+                -- time count against the review cap; learning/relearning
+                -- steps are not subject to a daily limit.
                 (SELECT COUNT(*) FROM review_log r
                     JOIN sr_card s ON s.id = r.sr_card_id
-                    WHERE s.sr_deck_id = d.id AND s.state = 'review' AND r.reviewed_at >= ?3)
+                    WHERE s.sr_deck_id = d.id AND r.state = 'review' AND r.reviewed_at >= ?3)
          FROM deck d WHERE d.id = ?1",
         params![sr_deck_id, today_key(), day_start_str],
         |row| {
@@ -430,7 +432,13 @@ pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<G
             )
             .map_err(|_| Error::invalid("card is not in this deck"))?;
 
-        let next = srs::review(previous, grade, now);
+        let ctx = srs::Context {
+            now,
+            day_start: &day_start_in,
+            days_since_due: days_since(previous.due_at),
+            fuzz_seed: Some(srs::fuzz_seed(sr_card_id, previous.reps)),
+        };
+        let next = srs::review(previous, grade, &ctx);
         let leaving_new = previous.state == SrState::New;
         conn.execute(
             "UPDATE sr_card
@@ -455,13 +463,14 @@ pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<G
             ],
         )?;
         conn.execute(
-            "INSERT INTO review_log (sr_card_id, reviewed_at, grade, interval_days)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO review_log (sr_card_id, reviewed_at, grade, interval_days, state)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 sr_card_id,
                 to_string(now),
                 grade.as_i64(),
-                next.interval_days
+                next.interval_days,
+                previous.state.as_str()
             ],
         )?;
 
@@ -469,7 +478,13 @@ pub fn grade_sr_card(db: DbState<'_>, sr_card_id: i64, grade: Grade) -> Result<G
         let card = conn.query_row(&sql, params![sr_card_id], sr_card_from_row)?;
         Ok(GradeResult {
             card,
-            next_due_in: humanise((next.due_at - now).num_minutes()),
+            // Like Anki's answer buttons, review cards show their interval
+            // in days rather than the time left until their due day starts.
+            next_due_in: if next.state == SrState::Review {
+                humanise(next.interval_days as i64 * 1440)
+            } else {
+                humanise((next.due_at - now).num_minutes())
+            },
         })
     })
 }

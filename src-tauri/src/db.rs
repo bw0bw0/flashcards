@@ -51,6 +51,7 @@ fn prepare(conn: &Connection) -> Result<()> {
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_initial.sql"),
     include_str!("migrations/0002_sr_daily_limits.sql"),
+    include_str!("migrations/0003_review_log_state.sql"),
 ];
 
 fn migrate(conn: &Connection) -> Result<()> {
